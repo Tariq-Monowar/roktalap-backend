@@ -1,18 +1,28 @@
-// import express from "express";
-// import {  } from "./users.controller";
+import { Router } from "express";
+import { 
+  createDonor, 
+  createRecipient, 
+  loginUser,
+  updateProfile
+} from "./users.controllers";
+import upload from "../../config/multer.config";
+import { verifyUser } from "../../middleware/verifyUsers";
 
-// import upload from "../../config/multer.config";
+const router = Router();
 
+// Registration routes
+router.post("/register/donor", upload.single('birthId'), createDonor);
+router.post("/register/recipient", createRecipient);
 
-// const router = express.Router();
+// Login route
+router.post("/login", loginUser);
 
+// Protected update profile route
+router.put(
+  "/profile", 
+  verifyUser("ANY"), 
+  upload.single('birthId'), 
+  updateProfile
+);
 
-// router.post("/register", createUser);
-// router.post("/login", loginUser);
-
-
-
-
-
-
-// export default router;
+export default router;

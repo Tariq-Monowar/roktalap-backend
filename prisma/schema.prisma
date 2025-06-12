@@ -13,32 +13,33 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 model User {
-  id            String   @id @default(uuid())
-  fullName      String
-  email         String   @unique
-  password      String
+  id       String @id @default(uuid())
+  fullName String
+  email    String @unique
+  password String
 
-  address       String?  // optional
-  bio           String?  // optional
-  role          Role     @default(RECIPIENT)
-  
+  address String? // optional
+  bio     String? // optional
+  role    Role    @default(RECIPIENT)
 
-  location      Location?  @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  locationId    String?    
-   
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  locationId String?
 
   // required for donor, optional for recipient
-  bloodGroup    String? 
-  phoneNumber   String? 
+  bloodGroup  String?
+  phoneNumber String?
 
   // for donors only
-  birthIdUrl    String?  
-  birthDate     DateTime? 
+  birthIdUrl String?
+  birthDate  DateTime?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  image String?
+
+  donations Donation[] @relation("UserDonations")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Location {
@@ -49,9 +50,19 @@ model Location {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users     User[]
+  users User[]
 }
 
+model Donation {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation("UserDonations", fields: [userId], references: [id], onDelete: Cascade)
+  donationTime DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+}
 
 enum Role {
   ADMIN
