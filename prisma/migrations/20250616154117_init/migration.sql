@@ -6,7 +6,7 @@ CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "fullName" TEXT NOT NULL,
     "email" TEXT NOT NULL,
-    "password" TEXT NOT NULL,
+    "password" TEXT,
     "address" TEXT,
     "bio" TEXT,
     "role" "Role" NOT NULL DEFAULT 'RECIPIENT',

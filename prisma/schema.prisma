@@ -11,24 +11,24 @@ model User {
   id       String @id @default(uuid())
   fullName String
   email    String @unique
-  password String
+  password String?
 
-  address String? // optional
-  bio     String? // optional
-  role    Role
+  address String? 
+  bio     String? 
+  role    Role @default(RECIPIENT)
 
   // required for donor, optional for recipient
   bloodGroup  String?
   phoneNumber String?
 
   // for donors only
-  birthDate  DateTime?
+  birthDate DateTime?
 
-  image String?
+  image   String?
   birthID String?
 
   donations Donation[]
-  location   Location?
+  location  Location?
 
   locationId String?
 
@@ -44,7 +44,7 @@ model Location {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userId String @unique 
+  userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
