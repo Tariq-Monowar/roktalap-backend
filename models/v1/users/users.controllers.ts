@@ -57,7 +57,7 @@ export const googleAuth = async (req: Request, res: Response) => {
     }
 
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      { userId: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: "360d" }
     );
@@ -74,6 +74,7 @@ export const googleAuth = async (req: Request, res: Response) => {
       phoneNumber: user.phoneNumber || null,
       birthDate: user.birthDate ? user.birthDate.toISOString() : null,
       birthID: user.birthID ? getImageUrl(`/uploads/${user.birthID}`) : null,
+      isFirstTime: user?.isFirstTime,
     };
 
     res.status(200).json({
@@ -125,8 +126,18 @@ export const addUserRole = async (req: Request, res: Response) => {
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: { role },
+      data: { role, isFirstTime: false },
     });
+
+    const token = jwt.sign(
+      {
+        userId: updatedUser.id,
+        email: updatedUser.email,
+        role: updatedUser.role,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "360d" }
+    );
 
     const userData = {
       id: updatedUser.id,
@@ -144,12 +155,14 @@ export const addUserRole = async (req: Request, res: Response) => {
       birthID: updatedUser.birthID
         ? getImageUrl(`/uploads/${updatedUser.birthID}`)
         : null,
+      isFirstTime: updatedUser?.isFirstTime
     };
 
     res.status(200).json({
       success: true,
       message: "User role updated successfully",
       user: userData,
+      token
     });
   } catch (error) {
     console.error("Error updating user role:", error);
