@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-import { getImageUrl } from "../../../utils/base_utl";
+import { getImageUrl } from "../../utils/base_utl";
 
 const prisma = new PrismaClient();
 
@@ -18,7 +18,7 @@ const downloadAndSaveImage = async (imageUrl: string): Promise<string> => {
 
     const buffer = await response.arrayBuffer();
     const filename = `${uuidv4()}.jpg`;
-    const filepath = path.join(__dirname, "../../../uploads", filename);
+    const filepath = path.join(__dirname, "../../uploads", filename);
 
     fs.writeFileSync(filepath, Buffer.from(buffer));
     return filename;
@@ -94,63 +94,79 @@ export const addUserRole = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
 
-    const { role } = req.body;
-    if (!role) {
-      res.status(400).json({
-        success: false,
-        message: "Role is required",
-      });
-      return;
-    }
+    // const { role } = req.body;
+    // if (!role) {
+    //   res.status(400).json({
+    //     success: false,
+    //     message: "Role is required",
+    //   });
+    //   return;
+    // }
 
-    if (!["DONOR", "RECIPIENT"].includes(role)) {
-      res.status(400).json({
-        success: false,
-        message: "Invalid role. Role must be DONOR or RECIPIENT",
-      });
-      return;
-    }
+    // if (!["DONOR", "RECIPIENT"].includes(role)) {
+    //   res.status(400).json({
+    //     success: false,
+    //     message: "Invalid role. Role must be DONOR or RECIPIENT",
+    //   });
+    //   return;
+    // }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-    });
+    // const user = await prisma.user.findUnique({
+    //   where: { id: userId },
+    // });
 
-    if (!user) {
-      res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-      return;
-    }
+    // if (!user) {
+    //   res.status(404).json({
+    //     success: false,
+    //     message: "User not found",
+    //   });
+    //   return;
+    // }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: { role },
-    });
+    // if (user.role === role) {
+    //   res.status(200).json({
+    //     success: true,
+    //     message: "User already has this role",
+    //     user: {
+    //       id: user.id,
+    //       fullName: user.fullName,
+    //       email: user.email,
+    //       image: user.image ? getImageUrl(user.image) : null,
+    //       role: user.role,
+    //     },
+    //   });
+    // }
 
-    const userData = {
-      id: updatedUser.id,
-      fullName: updatedUser.fullName,
-      email: updatedUser.email,
-      image: updatedUser.image ? getImageUrl(updatedUser.image) : null,
-      address: updatedUser.address || null,
-      bio: updatedUser.bio || null,
-      role: updatedUser.role,
-      bloodGroup: updatedUser.bloodGroup || null,
-      phoneNumber: updatedUser.phoneNumber || null,
-      birthDate: updatedUser.birthDate
-        ? updatedUser.birthDate.toISOString()
-        : null,
-      birthID: updatedUser.birthID
-        ? getImageUrl(`/uploads/${updatedUser.birthID}`)
-        : null,
-    };
+    // // Update user role
+    // const updatedUser = await prisma.user.update({
+    //   where: { id: userId },
+    //   data: { role },
+    // });
 
-    res.status(200).json({
-      success: true,
-      message: "User role updated successfully",
-      user: userData,
-    });
+    // // Prepare response data
+    // const userData = {
+    //   id: updatedUser.id,
+    //   fullName: updatedUser.fullName,
+    //   email: updatedUser.email,
+    //   image: updatedUser.image ? getImageUrl(updatedUser.image) : null,
+    //   address: updatedUser.address || null,
+    //   bio: updatedUser.bio || null,
+    //   role: updatedUser.role,
+    //   bloodGroup: updatedUser.bloodGroup || null,
+    //   phoneNumber: updatedUser.phoneNumber || null,
+    //   birthDate: updatedUser.birthDate
+    //     ? updatedUser.birthDate.toISOString()
+    //     : null,
+    //   birthID: updatedUser.birthID
+    //     ? getImageUrl(`/uploads/${updatedUser.birthID}`)
+    //     : null,
+    // };
+
+    // res.status(200).json({
+    //   success: true,
+    //   message: "User role updated successfully",
+    //   user: userData,
+    // });
   } catch (error) {
     console.error("Error updating user role:", error);
     res.status(500).json({
