@@ -25,6 +25,8 @@ model User {
   birthDate DateTime?
 
   image   String?
+
+   // for donors only
   birthID String?
 
   donations Donation[]
@@ -35,6 +37,16 @@ model User {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model Ucode {
+  id         Int      @id @default(autoincrement())
+  name       String
+  email      String   @unique
+  password   String?
+  otp        String
+  expired_at DateTime
+  createdAt  DateTime @default(now())
 }
 
 model Location {

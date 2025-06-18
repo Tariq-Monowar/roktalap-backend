@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 
 import dotenv from "dotenv";
-import { emailForgotPasswordOTP } from "../constants/email_message";
+import { emailForgotPasswordOTP, RegistrationOTPEmailMessage } from "../constants/email_message";
 
 dotenv.config();
 
@@ -33,6 +33,11 @@ const sendEmail = async (
 
   await mailTransporter.sendMail(mailOptions);
 };
+
+export const sendRegistrationOTPEmail = async (userName: string, email: string, otp: string) => {
+  await sendEmail(email, "Your OTP Code for SocialApp", RegistrationOTPEmailMessage(userName, email, otp)); 
+};
+
 
 export const sendForgotPasswordOTP = async (
   userName: string,
