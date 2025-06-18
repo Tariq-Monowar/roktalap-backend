@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, User } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -11,11 +11,28 @@ import {
   generateOTP,
   sendRegistrationOTPEmail,
 } from "../../../utils/emailService.utils";
-import { transformUserResponse } from "../../../utils/userTransformer";
+// import { transformUserResponse } from "../../../utils/userTransformer";
 
 const prisma = new PrismaClient();
 
 dotenv.config();
+
+function transformUserResponse(user: User) {
+  return {
+    id: user.id,
+    fullName: user.fullName,
+    email: user.email,
+    image: user.image ? getImageUrl(user.image) : null,
+    address: user.address || null,
+    bio: user.bio || null,
+    role: user.role,
+    bloodGroup: user.bloodGroup || null,
+    phoneNumber: user.phoneNumber || null,
+    birthDate: user.birthDate ? user.birthDate.toISOString() : null,
+    birthID: user.birthID ? getImageUrl(user.birthID) : null,
+    isFirstTime: user.isFirstTime,
+  };
+}
 
 const downloadAndSaveImage = async (imageUrl: string): Promise<string> => {
   try {
@@ -280,12 +297,12 @@ export const signupverifyOtp = async (req: Request, res: Response) => {
       { expiresIn: "360d" }
     );
 
-    const { password: _, ...userWithoutPassword } = user;
+  
 
     res.status(201).json({
       success: true,
       message: "User registered successfully",
-      user: userWithoutPassword,
+      user: transformUserResponse(user),
       token,
     });
   } catch (error) {
