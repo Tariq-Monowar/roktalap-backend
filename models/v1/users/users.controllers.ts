@@ -11,6 +11,7 @@ import {
   generateOTP,
   sendRegistrationOTPEmail,
 } from "../../../utils/emailService.utils";
+import { transformUserResponse } from "../../../utils/userTransformer";
 
 const prisma = new PrismaClient();
 
@@ -67,20 +68,7 @@ export const googleAuth = async (req: Request, res: Response) => {
       { expiresIn: "360d" }
     );
 
-    const userData = {
-      id: user.id,
-      fullName: user.fullName,
-      email: user.email,
-      image: user.image ? getImageUrl(user.image) : null,
-      address: user.address || null,
-      bio: user.bio || null,
-      role: user.role,
-      bloodGroup: user.bloodGroup || null,
-      phoneNumber: user.phoneNumber || null,
-      birthDate: user.birthDate ? user.birthDate.toISOString() : null,
-      birthID: user.birthID ? getImageUrl(`/uploads/${user.birthID}`) : null,
-      isFirstTime: user?.isFirstTime,
-    };
+    const userData = transformUserResponse(user);
 
     res.status(200).json({
       success: true,
@@ -144,24 +132,7 @@ export const addUserRole = async (req: Request, res: Response) => {
       { expiresIn: "360d" }
     );
 
-    const userData = {
-      id: updatedUser.id,
-      fullName: updatedUser.fullName,
-      email: updatedUser.email,
-      image: updatedUser.image ? getImageUrl(updatedUser.image) : null,
-      address: updatedUser.address || null,
-      bio: updatedUser.bio || null,
-      role: updatedUser.role,
-      bloodGroup: updatedUser.bloodGroup || null,
-      phoneNumber: updatedUser.phoneNumber || null,
-      birthDate: updatedUser.birthDate
-        ? updatedUser.birthDate.toISOString()
-        : null,
-      birthID: updatedUser.birthID
-        ? getImageUrl(`/uploads/${updatedUser.birthID}`)
-        : null,
-      isFirstTime: updatedUser?.isFirstTime,
-    };
+    const userData = transformUserResponse(updatedUser);
 
     res.status(200).json({
       success: true,
@@ -326,67 +297,79 @@ export const signupverifyOtp = async (req: Request, res: Response) => {
   }
 };
 
-
-
-
 export const updateUserProfile = async (req: Request, res: Response) => {
   try {
     const { userId } = req.user;
-    const { fullName, address, bio, bloodGroup, phoneNumber, birthDate } = req.body;
-    const newImage = req.file;
+    const { fullName, address, bio, bloodGroup, phoneNumber, birthDate } =
+      req.body;
 
-    // Validate required fields
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    const newImage = files?.image?.[0];
+    const newBirthID = files?.birthID?.[0];
+
     if (!userId) {
-       res.status(400).json({
+      res.status(400).json({
         success: false,
         message: "User ID is required",
       });
-      return
+      return;
     }
 
-    // Find existing user
     const existingUser = await prisma.user.findUnique({
       where: { id: String(userId) },
     });
 
     if (!existingUser) {
-      // Clean up uploaded file if user not found
       if (newImage) {
         try {
-          const imagePath = path.join(__dirname, "../../../uploads", newImage.filename);
-          if (fs.existsSync(imagePath)) {
-            fs.unlinkSync(imagePath);
-          }
+          const imagePath = path.join(
+            __dirname,
+            "../../../uploads",
+            newImage.filename
+          );
+          if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
         } catch (fileError) {
           console.error("Error cleaning up image:", fileError);
         }
       }
-       res.status(404).json({
+      if (newBirthID) {
+        try {
+          const birthIDPath = path.join(
+            __dirname,
+            "../../../uploads",
+            newBirthID.filename
+          );
+          if (fs.existsSync(birthIDPath)) fs.unlinkSync(birthIDPath);
+        } catch (fileError) {
+          console.error("Error cleaning up birthID:", fileError);
+        }
+      }
+      res.status(404).json({
         success: false,
         message: "User not found",
       });
-      return
     }
 
-    // Prepare update data
     const updateData: any = {
       fullName: fullName || existingUser.fullName,
       address: address !== undefined ? address : existingUser.address,
       bio: bio !== undefined ? bio : existingUser.bio,
-      bloodGroup: bloodGroup !== undefined ? bloodGroup : existingUser.bloodGroup,
-      phoneNumber: phoneNumber !== undefined ? phoneNumber : existingUser.phoneNumber,
+      bloodGroup:
+        bloodGroup !== undefined ? bloodGroup : existingUser.bloodGroup,
+      phoneNumber:
+        phoneNumber !== undefined ? phoneNumber : existingUser.phoneNumber,
       birthDate: birthDate ? new Date(birthDate) : existingUser.birthDate,
     };
 
-    // Handle image update
     if (newImage) {
-      // Delete old image if exists
       if (existingUser.image) {
         try {
-          const oldImagePath = path.join(__dirname, "../../../uploads", existingUser.image);
-          if (fs.existsSync(oldImagePath)) {
-            fs.unlinkSync(oldImagePath);
-          }
+          const oldImagePath = path.join(
+            __dirname,
+            "../../../uploads",
+            existingUser.image
+          );
+          if (fs.existsSync(oldImagePath)) fs.unlinkSync(oldImagePath);
         } catch (fileError) {
           console.error("Error deleting old image:", fileError);
         }
@@ -394,97 +377,116 @@ export const updateUserProfile = async (req: Request, res: Response) => {
       updateData.image = newImage.filename;
     }
 
-    // Handle birthID update
-    if (req.body.birthID) {
-      try {
-        // Delete old birthID if exists
-        if (existingUser.birthID) {
-          const oldBirthIDPath = path.join(__dirname, "../../../uploads", existingUser.birthID);
-          if (fs.existsSync(oldBirthIDPath)) {
-            fs.unlinkSync(oldBirthIDPath);
-          }
+    if (newBirthID) {
+      if (existingUser.birthID) {
+        try {
+          const oldBirthIDPath = path.join(
+            __dirname,
+            "../../../uploads",
+            existingUser.birthID
+          );
+          if (fs.existsSync(oldBirthIDPath)) fs.unlinkSync(oldBirthIDPath);
+        } catch (fileError) {
+          console.error("Error deleting old birthID:", fileError);
         }
-        
-        // Save new birthID
-        const birthIDPath = await downloadAndSaveImage(req.body.birthID);
-        updateData.birthID = birthIDPath;
-      } catch (fileError) {
-        console.error("Error handling birthID:", fileError);
-        // Clean up uploaded image if birthID failed
-        if (newImage) {
-          try {
-            const imagePath = path.join(__dirname, "../../../uploads", newImage.filename);
-            if (fs.existsSync(imagePath)) {
-              fs.unlinkSync(imagePath);
-            }
-          } catch (cleanupError) {
-            console.error("Error cleaning up image:", cleanupError);
-          }
-        }
-         res.status(500).json({
-          success: false,
-          message: "Failed to process birthID image",
-        });
-        return
       }
+      updateData.birthID = newBirthID.filename;
     }
 
-    // Update user data
     const updatedUser = await prisma.user.update({
       where: { id: String(userId) },
       data: updateData,
     });
 
-    // Generate new token
+    const responseData = transformUserResponse(updatedUser);
+
+    res.status(200).json({
+      success: true,
+      message: "User profile updated successfully",
+      user: responseData,
+    });
+  } catch (error) {
+    console.error("Error in updateUserProfile:", error);
+
+    if (req.files) {
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      for (const field in files) {
+        const fileArray = files[field];
+        for (const file of fileArray) {
+          try {
+            const filePath = path.join(
+              __dirname,
+              "../../../uploads",
+              file.filename
+            );
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+          } catch (fileError) {
+            console.error(`Error cleaning up ${field}:`, fileError);
+          }
+        }
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Internal server error",
+    });
+  }
+};
+
+export const switchUserRole = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+      return;
+    }
+
+    if (!["DONOR", "RECIPIENT"].includes(user.role)) {
+      res.status(400).json({
+        success: false,
+        message: "User role must be either DONOR or RECIPIENT",
+      });
+      return;
+    }
+
+    const newRole = user.role === "DONOR" ? "RECIPIENT" : "DONOR";
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { role: newRole },
+    });
+
     const token = jwt.sign(
       {
         userId: updatedUser.id,
         email: updatedUser.email,
         role: updatedUser.role,
       },
-      process.env.JWT_SECRET!,
+      process.env.JWT_SECRET,
       { expiresIn: "360d" }
     );
 
-    // Prepare response
-    const responseData = {
-      id: updatedUser.id,
-      fullName: updatedUser.fullName,
-      email: updatedUser.email,
-      image: updatedUser.image ? getImageUrl(updatedUser.image) : null,
-      address: updatedUser.address,
-      bio: updatedUser.bio,
-      role: updatedUser.role,
-      bloodGroup: updatedUser.bloodGroup,
-      phoneNumber: updatedUser.phoneNumber,
-      birthDate: updatedUser.birthDate?.toISOString(),
-      birthID: updatedUser.birthID ? getImageUrl(`/uploads/${updatedUser.birthID}`) : null,
-      isFirstTime: updatedUser.isFirstTime,
-    };
+    const userData = transformUserResponse(updatedUser) 
 
-     res.status(200).json({
+
+    res.status(200).json({
       success: true,
-      message: "User profile updated successfully",
-      user: responseData,
+      message: `User role switched to ${newRole} successfully`,
+      user: userData,
       token,
     });
-
   } catch (error) {
-    console.error("Error in updateUserProfile:", error);
-    
-    // Clean up uploaded file if error occurred
-    if (req.file) {
-      try {
-        const imagePath = path.join(__dirname, "../../../uploads", req.file.filename);
-        if (fs.existsSync(imagePath)) {
-          fs.unlinkSync(imagePath);
-        }
-      } catch (fileError) {
-        console.error("Error cleaning up uploaded image:", fileError);
-      }
-    }
-
-     res.status(500).json({
+    console.error("Error switching user role:", error);
+    res.status(500).json({
       success: false,
       message: error instanceof Error ? error.message : "Internal server error",
     });

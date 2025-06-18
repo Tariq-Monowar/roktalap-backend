@@ -21,4 +21,12 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage: storage });
+
+
+export const multipleUpload = upload.fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'birthID', maxCount: 1 }
+]);
+
+
 export default upload
