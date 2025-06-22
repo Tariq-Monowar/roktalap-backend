@@ -95,8 +95,8 @@ model Message {
   content        String
   senderId       String
   conversationId String
-  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+   sender         User?        @relation(fields: [senderId], references: [id])
+   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 }
@@ -111,3 +111,28 @@ enum Role {
   DONOR
   RECIPIENT
 }
+
+
+
+
+// // "Delete" a user (soft delete)
+// await prisma.user.update({
+//   where: { id: userId },
+//   data: { isDeleted: true }
+// });
+
+// // Get conversations with messages including deleted users' messages
+// const conversation = await prisma.conversation.findUnique({
+//   where: { id: conversationId },
+//   include: {
+//     messages: {
+//       include: {
+//         sender: true // will include null for deleted senders
+//       }
+//     },
+//     users: {
+//       where: { isDeleted: false } // filter out deleted users
+//     }
+//   }
+// });
+// https://chat.deepseek.com/a/chat/s/ea4c7c0b-5193-490f-8a16-75daeee68f2c
