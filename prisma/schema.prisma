@@ -24,9 +24,9 @@ model User {
   // for donors only
   birthDate DateTime?
 
-  image   String?
+  image String?
 
-   // for donors only
+  // for donors only
   birthID String?
 
   donations Donation[]
@@ -35,8 +35,14 @@ model User {
   locationId  String?
   isFirstTime Boolean @default(true)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  messages      Message[] 
+ conversations Conversation[] @relation("UserConversations") 
+
+ 
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  conversationId String?
 }
 
 model Ucode {
@@ -70,6 +76,34 @@ model Donation {
   updatedAt    DateTime @updatedAt
 
   @@index([userId])
+}
+
+model Conversation {
+  id        String      @id @default(uuid())
+  type      ChatType    @default(SINGLE)
+  name      String?
+  image     String?
+  messages  Message[]
+  users     User[]      @relation("UserConversations")
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}
+
+
+model Message {
+  id             String       @id @default(uuid())
+  content        String
+  senderId       String
+  conversationId String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+enum ChatType {
+  SINGLE
+  GROUP
 }
 
 enum Role {
