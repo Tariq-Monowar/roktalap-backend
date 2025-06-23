@@ -104,7 +104,8 @@ export const googleAuth = async (req: Request, res: Response) => {
 export const addUserRole = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
-
+    console.log(userId)
+    console.log(req.body)
     const { role } = req.body;
     if (!role) {
       res.status(400).json({

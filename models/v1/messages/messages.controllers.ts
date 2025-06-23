@@ -7,20 +7,66 @@ const prisma = new PrismaClient()
 export const createConversation = async (req: Request, res: Response) => {
   try {
     const { userIds, name, type = "SINGLE" } = req.body
-    const currentUserId = req.user.id
+    const currentUserId = req.user?.userId // ✅ FIXED: Changed from req.user?.id to req.user?.userId
+
+    // Validate current user ID
+    if (!currentUserId) {
+      res.status(401).json({ message: "User not authenticated" })
+      return
+    }
+
+    // Validate userIds
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      res.status(400).json({ message: "userIds is required and must be a non-empty array" })
+      return
+    }
+
+    // Filter out any undefined/null values from userIds
+    const validUserIds = userIds.filter((id) => id && typeof id === "string")
+
+    if (validUserIds.length === 0) {
+      res.status(400).json({ message: "No valid user IDs provided" })
+      return
+    }
+
+    console.log("Creating conversation:", {
+      currentUserId,
+      validUserIds,
+      type,
+      name,
+    })
 
     // For single chat, check if conversation already exists
-    if (type === "SINGLE" && userIds.length === 1) {
+    if (type === "SINGLE" && validUserIds.length === 1) {
+      const participantIds = [currentUserId, ...validUserIds]
+
       const existingConversation = await prisma.conversation.findFirst({
         where: {
           type: "SINGLE",
           users: {
             every: {
               id: {
-                in: [currentUserId, ...userIds],
+                in: participantIds,
               },
             },
           },
+          // Ensure exactly 2 users in the conversation
+          AND: [
+            {
+              users: {
+                some: {
+                  id: currentUserId,
+                },
+              },
+            },
+            {
+              users: {
+                some: {
+                  id: validUserIds[0],
+                },
+              },
+            },
+          ],
         },
         include: {
           users: {
@@ -38,10 +84,26 @@ export const createConversation = async (req: Request, res: Response) => {
               email: true,
             },
           },
+          messages: {
+            take: 1,
+            orderBy: {
+              createdAt: "desc",
+            },
+            include: {
+              sender: {
+                select: {
+                  id: true,
+                  fullName: true,
+                },
+              },
+            },
+          },
         },
       })
 
       if (existingConversation) {
+        console.log("Found existing conversation:", existingConversation.id)
+
         // Add online status from Socket.IO tracking
         const conversationWithOnlineStatus = {
           ...existingConversation,
@@ -56,13 +118,14 @@ export const createConversation = async (req: Request, res: Response) => {
       }
     }
 
+    // Create new conversation
     const conversation = await prisma.conversation.create({
       data: {
         type: type as "SINGLE" | "GROUP",
         name: type === "GROUP" ? name : null,
         adminId: type === "GROUP" ? currentUserId : null,
         users: {
-          connect: [{ id: currentUserId }, ...userIds.map((id: string) => ({ id }))],
+          connect: [{ id: currentUserId }, ...validUserIds.map((id: string) => ({ id }))],
         },
       },
       include: {
@@ -81,8 +144,24 @@ export const createConversation = async (req: Request, res: Response) => {
             email: true,
           },
         },
+        messages: {
+          take: 1,
+          orderBy: {
+            createdAt: "desc",
+          },
+          include: {
+            sender: {
+              select: {
+                id: true,
+                fullName: true,
+              },
+            },
+          },
+        },
       },
     })
+
+    console.log("Created new conversation:", conversation.id)
 
     // Add online status from Socket.IO tracking
     const conversationWithOnlineStatus = {
@@ -96,13 +175,24 @@ export const createConversation = async (req: Request, res: Response) => {
     res.status(201).json(conversationWithOnlineStatus)
   } catch (error) {
     console.error("Create conversation error:", error)
-    res.status(500).json({ message: "Failed to create conversation", error })
+    res.status(500).json({
+      message: "Failed to create conversation",
+      error: error.message,
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    })
   }
 }
 
 export const getConversations = async (req: Request, res: Response) => {
   try {
-    const userId = req.user.id
+    const userId = req.user?.userId // ✅ FIXED: Changed from req.user?.id to req.user?.userId
+
+    if (!userId) {
+      res.status(401).json({ message: "User not authenticated" })
+      return
+    }
+
+    console.log("Getting conversations for user:", userId)
 
     const conversations = await prisma.conversation.findMany({
       where: {
@@ -148,6 +238,8 @@ export const getConversations = async (req: Request, res: Response) => {
       },
     })
 
+    console.log(`Found ${conversations.length} conversations for user ${userId}`)
+
     // Add online status from Socket.IO tracking
     const conversationsWithOnlineStatus = conversations.map((conversation) => ({
       ...conversation,
@@ -160,7 +252,11 @@ export const getConversations = async (req: Request, res: Response) => {
     res.status(200).json(conversationsWithOnlineStatus)
   } catch (error) {
     console.error("Get conversations error:", error)
-    res.status(500).json({ message: "Failed to get conversations", error })
+    res.status(500).json({
+      message: "Failed to get conversations",
+      error: error.message,
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    })
   }
 }
 
@@ -168,7 +264,19 @@ export const sendMessage = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
     const { content } = req.body
-    const senderId = req.user.id
+    const senderId = req.user?.userId // ✅ FIXED: Changed from req.user?.id to req.user?.userId
+
+    if (!senderId) {
+      res.status(401).json({ message: "User not authenticated" })
+      return
+    }
+
+    if (!content || !content.trim()) {
+      res.status(400).json({ message: "Message content is required" })
+      return
+    }
+
+    console.log("Sending message:", { conversationId, senderId, content: content.substring(0, 50) + "..." })
 
     // Verify user is part of the conversation
     const conversation = await prisma.conversation.findFirst({
@@ -193,7 +301,7 @@ export const sendMessage = async (req: Request, res: Response) => {
     // Create message in database
     const message = await prisma.message.create({
       data: {
-        content,
+        content: content.trim(),
         senderId,
         conversationId,
       },
@@ -220,6 +328,8 @@ export const sendMessage = async (req: Request, res: Response) => {
       data: { updatedAt: new Date() },
     })
 
+    console.log("Message created:", message.id)
+
     // Emit message to conversation room
     io.to(conversationId).emit("new_message", message)
 
@@ -237,17 +347,28 @@ export const sendMessage = async (req: Request, res: Response) => {
     res.status(201).json(message)
   } catch (error) {
     console.error("Send message error:", error)
-    res.status(500).json({ message: "Failed to send message", error })
+    res.status(500).json({
+      message: "Failed to send message",
+      error: error.message,
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    })
   }
 }
 
 export const getMessages = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
-    const userId = req.user.id
+    const userId = req.user?.userId // ✅ FIXED: Changed from req.user?.id to req.user?.userId
     const page = Number.parseInt(req.query.page as string) || 1
     const limit = Number.parseInt(req.query.limit as string) || 50
     const skip = (page - 1) * limit
+
+    if (!userId) {
+      res.status(401).json({ message: "User not authenticated" })
+      return
+    }
+
+    console.log("Getting messages:", { conversationId, userId, page, limit })
 
     // Verify user is part of the conversation
     const conversation = await prisma.conversation.findFirst({
@@ -286,10 +407,16 @@ export const getMessages = async (req: Request, res: Response) => {
     // Reverse to get chronological order
     const reversedMessages = messages.reverse()
 
+    console.log(`Found ${reversedMessages.length} messages for conversation ${conversationId}`)
+
     res.status(200).json(reversedMessages)
   } catch (error) {
     console.error("Get messages error:", error)
-    res.status(500).json({ message: "Failed to get messages", error })
+    res.status(500).json({
+      message: "Failed to get messages",
+      error: error.message,
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    })
   }
 }
 
@@ -297,7 +424,7 @@ export const addUserToGroup = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
     const { userId } = req.body
-    const currentUserId = req.user.id
+    const currentUserId = req.user?.userId // ✅ FIXED: Changed from req.user.id to req.user?.userId
 
     // Check if current user is admin of the group
     const conversation = await prisma.conversation.findFirst({
@@ -351,7 +478,7 @@ export const removeUserFromGroup = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
     const { userId } = req.body
-    const currentUserId = req.user.id
+    const currentUserId = req.user?.userId // ✅ FIXED: Changed from req.user.id to req.user?.userId
 
     // Check if current user is admin of the group
     const conversation = await prisma.conversation.findFirst({
@@ -401,7 +528,7 @@ export const updateGroupInfo = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
     const { name, description, image } = req.body
-    const currentUserId = req.user.id
+    const currentUserId = req.user?.userId // ✅ FIXED: Changed from req.user.id to req.user?.userId
 
     // Check if current user is admin of the group
     const conversation = await prisma.conversation.findFirst({
@@ -443,7 +570,7 @@ export const updateGroupInfo = async (req: Request, res: Response) => {
 export const leaveGroup = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
-    const currentUserId = req.user.id
+    const currentUserId = req.user?.userId // ✅ FIXED: Changed from req.user.id to req.user?.userId
 
     const conversation = await prisma.conversation.findFirst({
       where: {
@@ -521,5 +648,81 @@ export const leaveGroup = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Leave group error:", error)
     res.status(500).json({ message: "Failed to leave group", error })
+  }
+}
+
+export const searchDonors = async (req: Request, res: Response) => {
+  try {
+    const { search } = req.query;
+    const searchText = (search as string)?.trim();
+
+    if (!searchText) {
+      const donors = await prisma.user.findMany({
+        where: { role: "DONOR" },
+        include: { location: true },
+        take: 50 // Limit results when no search term
+      });
+       res.status(200).json(donors);
+       return
+    }
+
+    // Use full-text search if available, otherwise optimized query
+    const donors = await prisma.user.findMany({
+      where: {
+        role: "DONOR",
+        OR: [
+          { fullName: { contains: searchText, mode: "insensitive" } },
+          { bloodGroup: { contains: searchText, mode: "insensitive" } },
+          { location: { address: { contains: searchText, mode: "insensitive" } } }
+        ]
+      },
+      include: {
+        location: true,
+      },
+      take: 100 // Limit results
+    });
+
+    res.status(200).json(donors);
+  } catch (error) {
+    console.error("Donor search failed:", error);
+    res.status(500).json({ message: "Donor search failed", error });
+  }
+}
+
+export const searchRecepent = async (req: Request, res: Response) => {
+  try {
+    const { search } = req.query;
+    const searchText = (search as string)?.trim();
+
+    if (!searchText) {
+      const donors = await prisma.user.findMany({
+        where: { role: "RECIPIENT" },
+        include: { location: true },
+        take: 50 // Limit results when no search term
+      });
+       res.status(200).json(donors);
+       return
+    }
+
+    // Use full-text search if available, otherwise optimized query
+    const donors = await prisma.user.findMany({
+      where: {
+        role: "RECIPIENT",
+        OR: [
+          { fullName: { contains: searchText, mode: "insensitive" } },
+          { bloodGroup: { contains: searchText, mode: "insensitive" } },
+          { location: { address: { contains: searchText, mode: "insensitive" } } }
+        ]
+      },
+      include: {
+        location: true,
+      },
+      take: 100 // Limit results
+    });
+
+    res.status(200).json(donors);
+  } catch (error) {
+    console.error("Donor search failed:", error);
+    res.status(500).json({ message: "Donor search failed", error });
   }
 }

@@ -9,9 +9,19 @@ import {
   removeUserFromGroup,
   updateGroupInfo,
   leaveGroup,
+  searchDonors,
+  searchRecepent
 } from "./messages.controllers"
 
 const router = express.Router()
+
+// search user
+
+router.get("/search-donors",  searchDonors)
+router.get("/search-recipient",  searchRecepent)
+
+
+
 
 // Create new conversation
 router.post("/conversations", verifyUser("ANY"), createConversation)
