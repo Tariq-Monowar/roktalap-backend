@@ -1,0 +1,43 @@
+ROKTALAP-BACKEND
+│
+├── .git
+├── config
+│   └── multer.config.ts
+│   └── verifyUsers.ts
+│   └── email_message.ts
+├── constants
+│
+├── middleware
+│   └── email_message.ts
+├── models
+│   ├── v1
+│   │   ├── donation
+│   │   ├── messages
+│   │   │   ├── messages.controllers.ts
+│   │   │   ├── messages.routes.ts
+│   │   └── users
+│   │       ├── users.controllers.ts
+│   │       ├── users.routes.ts
+│   └── v2
+├── node_modules
+├── prisma
+│   ├── migrations
+│   └── schema.prisma
+├── types
+│   └── express.d.ts
+├── uploads
+│   ├── 74a6edc1-bf53-4f3a-8644-0b0975e43931
+│   ├── c69ca761-439c-4167-a251-0cdf8b86050d
+│   └── e26c5b91-b413-4dc7-a0bd-a951129892fe
+├── utils
+│   ├── base_utils.ts
+│   ├── emailService.utils.ts
+│   └── userTransformer.ts
+├── .env.example
+├── .env
+├── .gitignore
+├── app.ts
+├── index.ts
+├── package-lock.json
+├── package.json
+└── tsconfig.json

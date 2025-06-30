@@ -8,12 +8,22 @@ import morgan from "morgan";
 import path from "path";
 import http from "http";
 import { Server } from "socket.io";
+import { Socket } from "socket.io";
+import { DefaultEventsMap } from "socket.io/dist/typed-events";
+
+interface CustomSocket extends Socket<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap> {
+  userId?: string;
+}
 
 import users from "./models/v1/users/users.routes";
 import messages from "./models/v1/messages/messages.routes";
+import { PrismaClient } from "@prisma/client";
 
 const app = express();
 const server = http.createServer(app);
+
+
+const prisma = new PrismaClient();
 
 export const io = new Server(server, {
   pingTimeout: 60000,
@@ -26,6 +36,7 @@ export const io = new Server(server, {
       "http://localhost:5173",
       "http://localhost:5174",
       "https://v0-fix-previous-code.vercel.app",
+      "https://v0-firebase-backend-setup-khaki.vercel.app"
     ],
     methods: ["GET", "POST"],
     credentials: true,
@@ -46,18 +57,11 @@ export const onlineUsers: Record<
 > = {};
 export const typingUsers: Record<string, Set<string>> = {};
 
-io.on("connection", (socket) => {
+io.on("connection", (socket: CustomSocket) => {
   console.log("User connected", socket.id);
 
   // User registration - purely in-memory
-  socket.on(
-    "register",
-    (userData: {
-      id: string;
-      fullName: string;
-      email: string;
-      image?: string;
-    }) => {
+  socket.on("register",(userData: {id: string; fullName: string; email: string; image?: string}) => {
       const { id, fullName, email, image } = userData;
 
       // Store socket mapping
@@ -195,6 +199,136 @@ io.on("connection", (socket) => {
       onlineUsers[userId].connectedAt = new Date();
     }
   });
+
+  // Call signaling events
+  socket.on("initiate_call", async (data: { conversationId: string }) => {
+    try {
+      // Find userId by socket ID
+      const userId = Object.keys(userSockets).find(
+        (id) => userSockets[id] === socket.id
+      );
+      
+      if (!userId) {
+        throw new Error("User not found for this socket connection");
+      }
+      
+      // Create a call message
+      const message = await prisma.message.create({
+        data: {
+          type: "CALL" as const,
+          content: "Started a call",
+          senderId: userId,
+          conversationId: data.conversationId,
+          callStatus: "MISSED"
+        },
+        include: {
+          sender: true,
+          conversation: {
+            include: {
+              users: true
+            }
+          }
+        }
+      });
+
+      // Notify other participants
+      message.conversation.users.forEach(user => {
+        if (user.id !== userId && userSockets[user.id]) {
+          io.to(userSockets[user.id]).emit("incoming_call", {
+            messageId: message.id,
+            conversationId: data.conversationId,
+            caller: message.sender
+          });
+        }
+      });
+
+    } catch (error) {
+      console.error("Call initiation error:", error);
+    }
+  });
+
+  socket.on("call_response", async (data: { 
+    messageId: string,
+    response: "accept" | "decline"
+  }) => {
+    try {
+      const userId = Object.keys(userSockets).find(
+        (id) => userSockets[id] === socket.id
+      );
+
+      if (!userId) {
+        throw new Error("User not found for this socket connection");
+      }
+
+      const message = await prisma.message.findUnique({
+        where: { id: data.messageId },
+        include: { sender: true }
+      });
+
+      if (message) {
+        // Notify the caller
+        if (userSockets[message.senderId]) {
+          io.to(userSockets[message.senderId]).emit("call_answered", {
+            messageId: data.messageId,
+            userId: userId,
+            response: data.response
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Call response error:", error);
+    }
+  });
+
+  socket.on("end_call", async (data: { messageId: string; duration: number }) => {
+    try {
+      const message = await prisma.message.update({
+        where: { id: data.messageId },
+        data: {
+          callStatus: "COMPLETED",
+          callDuration: data.duration
+        },
+        include: {
+          conversation: {
+            include: {
+              users: true
+            }
+          }
+        }
+      });
+
+      // Notify all participants
+      message.conversation.users.forEach(user => {
+        if (userSockets[user.id]) {
+          io.to(userSockets[user.id]).emit("call_ended", {
+            messageId: data.messageId,
+            duration: data.duration
+          });
+        }
+      });
+    } catch (error) {
+      console.error("End call error:", error);
+    }
+  });
+
+  // WebRTC signaling
+  socket.on("webrtc_signal", (data: {
+    messageId: string,
+    targetUserId: string,
+    signal: any
+  }) => {
+    const userId = Object.keys(userSockets).find(
+      (id) => userSockets[id] === socket.id
+    );
+
+    if (userSockets[data.targetUserId] && userId) {
+      io.to(userSockets[data.targetUserId]).emit("webrtc_signal", {
+        messageId: data.messageId,
+        userId: userId,
+        signal: data.signal
+      });
+    }
+  });
 });
 
 // CORS configuration
@@ -208,6 +342,7 @@ app.use(
       "http://localhost:5173",
       "http://localhost:5174",
       "https://v0-fix-previous-code.vercel.app",
+      "https://v0-firebase-backend-setup-khaki.vercel.app"
     ],
     credentials: true,
   })

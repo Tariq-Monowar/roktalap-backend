@@ -7,21 +7,18 @@ const prisma = new PrismaClient()
 export const createConversation = async (req: Request, res: Response) => {
   try {
     const { userIds, name, type = "SINGLE" } = req.body
-    const currentUserId = req.user?.userId // ✅ FIXED: Changed from req.user?.id to req.user?.userId
+    const currentUserId = req.user?.userId
 
-    // Validate current user ID
     if (!currentUserId) {
       res.status(401).json({ message: "User not authenticated" })
       return
     }
 
-    // Validate userIds
     if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
       res.status(400).json({ message: "userIds is required and must be a non-empty array" })
       return
     }
 
-    // Filter out any undefined/null values from userIds
     const validUserIds = userIds.filter((id) => id && typeof id === "string")
 
     if (validUserIds.length === 0) {
@@ -50,7 +47,6 @@ export const createConversation = async (req: Request, res: Response) => {
               },
             },
           },
-          // Ensure exactly 2 users in the conversation
           AND: [
             {
               users: {
@@ -96,6 +92,16 @@ export const createConversation = async (req: Request, res: Response) => {
                   fullName: true,
                 },
               },
+              messageReads: {
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      fullName: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -104,7 +110,6 @@ export const createConversation = async (req: Request, res: Response) => {
       if (existingConversation) {
         console.log("Found existing conversation:", existingConversation.id)
 
-        // Add online status from Socket.IO tracking
         const conversationWithOnlineStatus = {
           ...existingConversation,
           users: existingConversation.users.map((user) => ({
@@ -156,6 +161,16 @@ export const createConversation = async (req: Request, res: Response) => {
                 fullName: true,
               },
             },
+            messageReads: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    fullName: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -163,7 +178,6 @@ export const createConversation = async (req: Request, res: Response) => {
 
     console.log("Created new conversation:", conversation.id)
 
-    // Add online status from Socket.IO tracking
     const conversationWithOnlineStatus = {
       ...conversation,
       users: conversation.users.map((user) => ({
@@ -185,7 +199,7 @@ export const createConversation = async (req: Request, res: Response) => {
 
 export const getConversations = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.userId // ✅ FIXED: Changed from req.user?.id to req.user?.userId
+    const userId = req.user?.userId
 
     if (!userId) {
       res.status(401).json({ message: "User not authenticated" })
@@ -230,6 +244,16 @@ export const getConversations = async (req: Request, res: Response) => {
                 fullName: true,
               },
             },
+            messageReads: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    fullName: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
@@ -240,16 +264,36 @@ export const getConversations = async (req: Request, res: Response) => {
 
     console.log(`Found ${conversations.length} conversations for user ${userId}`)
 
-    // Add online status from Socket.IO tracking
-    const conversationsWithOnlineStatus = conversations.map((conversation) => ({
-      ...conversation,
-      users: conversation.users.map((user) => ({
-        ...user,
-        isOnline: !!onlineUsers[user.id],
-      })),
-    }))
+    // Add online status and unread count
+    const conversationsWithStatus = await Promise.all(
+      conversations.map(async (conversation) => {
+        // Count unread messages for this user
+        const unreadCount = await prisma.message.count({
+          where: {
+            conversationId: conversation.id,
+            senderId: {
+              not: userId,
+            },
+            messageReads: {
+              none: {
+                userId: userId,
+              },
+            },
+          },
+        })
 
-    res.status(200).json(conversationsWithOnlineStatus)
+        return {
+          ...conversation,
+          unreadCount,
+          users: conversation.users.map((user) => ({
+            ...user,
+            isOnline: !!onlineUsers[user.id],
+          })),
+        }
+      })
+    )
+
+    res.status(200).json(conversationsWithStatus)
   } catch (error) {
     console.error("Get conversations error:", error)
     res.status(500).json({
@@ -264,7 +308,7 @@ export const sendMessage = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
     const { content } = req.body
-    const senderId = req.user?.userId // ✅ FIXED: Changed from req.user?.id to req.user?.userId
+    const senderId = req.user?.userId
 
     if (!senderId) {
       res.status(401).json({ message: "User not authenticated" })
@@ -319,6 +363,16 @@ export const sendMessage = async (req: Request, res: Response) => {
             users: true,
           },
         },
+        messageReads: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+              },
+            },
+          },
+        },
       },
     })
 
@@ -358,7 +412,7 @@ export const sendMessage = async (req: Request, res: Response) => {
 export const getMessages = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
-    const userId = req.user?.userId // ✅ FIXED: Changed from req.user?.id to req.user?.userId
+    const userId = req.user?.userId
     const page = Number.parseInt(req.query.page as string) || 1
     const limit = Number.parseInt(req.query.limit as string) || 50
     const skip = (page - 1) * limit
@@ -398,6 +452,16 @@ export const getMessages = async (req: Request, res: Response) => {
             image: true,
           },
         },
+        messageReads: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
       skip,
@@ -420,13 +484,247 @@ export const getMessages = async (req: Request, res: Response) => {
   }
 }
 
+// New function to mark a specific message as read
+export const markMessageAsRead = async (req: Request, res: Response) => {
+  try {
+    const { conversationId, messageId } = req.params
+    const userId = req.user?.userId
+
+    if (!userId) {
+      res.status(401).json({ message: "User not authenticated" })
+      return
+    }
+
+    // Verify user is part of the conversation
+    const conversation = await prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        users: {
+          some: {
+            id: userId,
+          },
+        },
+      },
+    })
+
+    if (!conversation) {
+      res.status(403).json({ message: "Not authorized to access this conversation" })
+      return
+    }
+
+    // Verify message exists in this conversation
+    const message = await prisma.message.findFirst({
+      where: {
+        id: messageId,
+        conversationId: conversationId,
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+      },
+    })
+
+    if (!message) {
+      res.status(404).json({ message: "Message not found" })
+      return
+    }
+
+    // Don't mark own messages as read
+    if (message.senderId === userId) {
+      res.status(400).json({ message: "Cannot mark own message as read" })
+      return
+    }
+
+    // Create or update read receipt
+    const messageRead = await prisma.messageRead.upsert({
+      where: {
+        messageId_userId: {
+          messageId: messageId,
+          userId: userId,
+        },
+      },
+      update: {
+        readAt: new Date(),
+      },
+      create: {
+        messageId: messageId,
+        userId: userId,
+        readAt: new Date(),
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+      },
+    })
+
+    console.log(`Message ${messageId} marked as read by user ${userId}`)
+
+    // Emit read receipt to conversation room
+    io.to(conversationId).emit("message_read", {
+      messageId: messageId,
+      readBy: messageRead.user,
+      readAt: messageRead.readAt,
+    })
+
+    // Notify the sender specifically
+    if (userSockets[message.senderId]) {
+      io.to(userSockets[message.senderId]).emit("message_read_receipt", {
+        messageId: messageId,
+        conversationId: conversationId,
+        readBy: messageRead.user,
+        readAt: messageRead.readAt,
+      })
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Message marked as read",
+      messageRead: messageRead,
+    })
+  } catch (error) {
+    console.error("Mark message as read error:", error)
+    res.status(500).json({
+      message: "Failed to mark message as read",
+      error: error.message,
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    })
+  }
+}
+
+// New function to mark all messages in a conversation as read
+export const markConversationAsRead = async (req: Request, res: Response) => {
+  try {
+    const { conversationId } = req.params
+    const userId = req.user?.userId
+
+    if (!userId) {
+      res.status(401).json({ message: "User not authenticated" })
+      return
+    }
+
+    // Verify user is part of the conversation
+    const conversation = await prisma.conversation.findFirst({
+      where: {
+        id: conversationId,
+        users: {
+          some: {
+            id: userId,
+          },
+        },
+      },
+    })
+
+    if (!conversation) {
+      res.status(403).json({ message: "Not authorized to access this conversation" })
+      return
+    }
+
+    // Get all unread messages in this conversation (not sent by current user)
+    const unreadMessages = await prisma.message.findMany({
+      where: {
+        conversationId: conversationId,
+        senderId: {
+          not: userId,
+        },
+        messageReads: {
+          none: {
+            userId: userId,
+          },
+        },
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            fullName: true,
+          },
+        },
+      },
+    })
+
+    if (unreadMessages.length === 0) {
+      res.status(200).json({
+        success: true,
+        message: "No unread messages to mark",
+        markedCount: 0,
+      })
+      return
+    }
+
+    // Create read receipts for all unread messages
+    const readReceipts = await Promise.all(
+      unreadMessages.map((message) =>
+        prisma.messageRead.create({
+          data: {
+            messageId: message.id,
+            userId: userId,
+            readAt: new Date(),
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+              },
+            },
+          },
+        })
+      )
+    )
+
+    console.log(`Marked ${readReceipts.length} messages as read in conversation ${conversationId} by user ${userId}`)
+
+    // Emit read receipts to conversation room
+    readReceipts.forEach((receipt, index) => {
+      const message = unreadMessages[index]
+      
+      io.to(conversationId).emit("message_read", {
+        messageId: message.id,
+        readBy: receipt.user,
+        readAt: receipt.readAt,
+      })
+
+      // Notify the sender specifically
+      if (userSockets[message.senderId]) {
+        io.to(userSockets[message.senderId]).emit("message_read_receipt", {
+          messageId: message.id,
+          conversationId: conversationId,
+          readBy: receipt.user,
+          readAt: receipt.readAt,
+        })
+      }
+    })
+
+    res.status(200).json({
+      success: true,
+      message: "All messages marked as read",
+      markedCount: readReceipts.length,
+    })
+  } catch (error) {
+    console.error("Mark conversation as read error:", error)
+    res.status(500).json({
+      message: "Failed to mark conversation as read",
+      error: error.message,
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    })
+  }
+}
+
+// Keep all your existing functions (addUserToGroup, removeUserFromGroup, etc.)
 export const addUserToGroup = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
     const { userId } = req.body
-    const currentUserId = req.user?.userId // ✅ FIXED: Changed from req.user.id to req.user?.userId
+    const currentUserId = req.user?.userId
 
-    // Check if current user is admin of the group
     const conversation = await prisma.conversation.findFirst({
       where: {
         id: conversationId,
@@ -440,7 +738,6 @@ export const addUserToGroup = async (req: Request, res: Response) => {
       return
     }
 
-    // Add user to group
     const updatedConversation = await prisma.conversation.update({
       where: { id: conversationId },
       data: {
@@ -460,7 +757,6 @@ export const addUserToGroup = async (req: Request, res: Response) => {
       },
     })
 
-    // Notify all users in the group
     io.to(conversationId).emit("user_added_to_group", {
       conversationId,
       addedUser: updatedConversation.users.find((u) => u.id === userId),
@@ -478,9 +774,8 @@ export const removeUserFromGroup = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
     const { userId } = req.body
-    const currentUserId = req.user?.userId // ✅ FIXED: Changed from req.user.id to req.user?.userId
+    const currentUserId = req.user?.userId
 
-    // Check if current user is admin of the group
     const conversation = await prisma.conversation.findFirst({
       where: {
         id: conversationId,
@@ -494,13 +789,11 @@ export const removeUserFromGroup = async (req: Request, res: Response) => {
       return
     }
 
-    // Cannot remove admin
     if (userId === currentUserId) {
       res.status(400).json({ message: "Admin cannot remove themselves" })
       return
     }
 
-    // Remove user from group
     await prisma.conversation.update({
       where: { id: conversationId },
       data: {
@@ -510,7 +803,6 @@ export const removeUserFromGroup = async (req: Request, res: Response) => {
       },
     })
 
-    // Notify all users in the group
     io.to(conversationId).emit("user_removed_from_group", {
       conversationId,
       removedUserId: userId,
@@ -528,9 +820,8 @@ export const updateGroupInfo = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
     const { name, description, image } = req.body
-    const currentUserId = req.user?.userId // ✅ FIXED: Changed from req.user.id to req.user?.userId
+    const currentUserId = req.user?.userId
 
-    // Check if current user is admin of the group
     const conversation = await prisma.conversation.findFirst({
       where: {
         id: conversationId,
@@ -553,7 +844,6 @@ export const updateGroupInfo = async (req: Request, res: Response) => {
       },
     })
 
-    // Notify all users in the group
     io.to(conversationId).emit("group_info_updated", {
       conversationId,
       updatedInfo: { name, description, image },
@@ -570,7 +860,7 @@ export const updateGroupInfo = async (req: Request, res: Response) => {
 export const leaveGroup = async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
-    const currentUserId = req.user?.userId // ✅ FIXED: Changed from req.user.id to req.user?.userId
+    const currentUserId = req.user?.userId
 
     const conversation = await prisma.conversation.findFirst({
       where: {
@@ -589,7 +879,6 @@ export const leaveGroup = async (req: Request, res: Response) => {
       return
     }
 
-    // If admin is leaving, transfer admin rights or delete group
     if (conversation.adminId === currentUserId) {
       const otherUsers = await prisma.conversation.findFirst({
         where: { id: conversationId },
@@ -605,7 +894,6 @@ export const leaveGroup = async (req: Request, res: Response) => {
       })
 
       if (otherUsers && otherUsers.users.length > 0) {
-        // Transfer admin to first available user
         await prisma.conversation.update({
           where: { id: conversationId },
           data: {
@@ -622,13 +910,11 @@ export const leaveGroup = async (req: Request, res: Response) => {
           leftUserId: currentUserId,
         })
       } else {
-        // Delete group if no other users
         await prisma.conversation.delete({
           where: { id: conversationId },
         })
       }
     } else {
-      // Regular user leaving
       await prisma.conversation.update({
         where: { id: conversationId },
         data: {
@@ -660,13 +946,12 @@ export const searchDonors = async (req: Request, res: Response) => {
       const donors = await prisma.user.findMany({
         where: { role: "DONOR" },
         include: { location: true },
-        take: 50 // Limit results when no search term
+        take: 50
       });
        res.status(200).json(donors);
        return
     }
 
-    // Use full-text search if available, otherwise optimized query
     const donors = await prisma.user.findMany({
       where: {
         role: "DONOR",
@@ -679,7 +964,7 @@ export const searchDonors = async (req: Request, res: Response) => {
       include: {
         location: true,
       },
-      take: 100 // Limit results
+      take: 100
     });
 
     res.status(200).json(donors);
@@ -698,13 +983,12 @@ export const searchRecepent = async (req: Request, res: Response) => {
       const donors = await prisma.user.findMany({
         where: { role: "RECIPIENT" },
         include: { location: true },
-        take: 50 // Limit results when no search term
+        take: 50
       });
        res.status(200).json(donors);
        return
     }
 
-    // Use full-text search if available, otherwise optimized query
     const donors = await prisma.user.findMany({
       where: {
         role: "RECIPIENT",
@@ -717,7 +1001,7 @@ export const searchRecepent = async (req: Request, res: Response) => {
       include: {
         location: true,
       },
-      take: 100 // Limit results
+      take: 100
     });
 
     res.status(200).json(donors);
