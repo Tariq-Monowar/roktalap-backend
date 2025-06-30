@@ -18,7 +18,7 @@ model User {
   role    Role    @default(RECIPIENT)
 
   // required for donor, optional for recipient
-  bloodGroup  String?
+  bloodGroup  BloodGroup?
   phoneNumber String?
 
   // for donors only
@@ -163,6 +163,17 @@ enum Role {
   ADMIN
   DONOR
   RECIPIENT
+}
+
+enum BloodGroup {
+  A_POSITIVE
+  A_NEGATIVE
+  B_POSITIVE
+  B_NEGATIVE
+  AB_POSITIVE
+  AB_NEGATIVE
+  O_POSITIVE
+  O_NEGATIVE
 }
 
 // // "Delete" a user (soft delete)

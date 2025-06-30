@@ -17,6 +17,8 @@ interface CustomSocket extends Socket<DefaultEventsMap, DefaultEventsMap, Defaul
 
 import users from "./models/v1/users/users.routes";
 import messages from "./models/v1/messages/messages.routes";
+import bloodTransfer from "./models/v1/bloods/bloods.routes";
+
 import { PrismaClient } from "@prisma/client";
 
 const app = express();
@@ -355,7 +357,7 @@ app.use(morgan("dev"));
 // Routes
 app.use("/v1/users", users);
 app.use("/v1/messages", messages);
-app.use("/v1/blord", blord)
+app.use("/v1/blord", bloodTransfer)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Error handling
