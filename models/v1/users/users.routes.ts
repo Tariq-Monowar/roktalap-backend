@@ -5,7 +5,8 @@ import {
   sendSignupOtp,
   signupverifyOtp,
   updateUserProfile,
-  switchUserRole
+  switchUserRole,
+  setLocation
 } from "./users.controllers";
 
 import upload, { multipleUpload } from "../../../config/multer.config";
@@ -22,5 +23,9 @@ router.post("/signup/verify-otp", signupverifyOtp);
 router.patch("/update", verifyUser("ANY"), multipleUpload, updateUserProfile);
 
 router.patch("/switch-role", verifyUser("ANY"), switchUserRole);
+
+
+router.patch("/set-location", verifyUser("ANY"), setLocation);
+
 
 export default router;

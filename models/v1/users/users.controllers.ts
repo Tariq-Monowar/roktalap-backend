@@ -11,7 +11,6 @@ import {
   generateOTP,
   sendRegistrationOTPEmail,
 } from "../../../utils/emailService.utils";
-// import { transformUserResponse } from "../../../utils/userTransformer";
 
 const prisma = new PrismaClient();
 
@@ -511,3 +510,69 @@ export const switchUserRole = async (req: Request, res: Response) => {
   }
 };
 
+
+// users.controllers.ts
+
+export const setLocation = async (req: Request, res: Response) => {
+  try {
+    const { latitude, longitude, address } = req.body;
+
+    const userId = req.user?.userId;
+
+    if (!latitude || !longitude) {
+       res.status(400).json({
+        success: false,
+        message: "Latitude and longitude are required",
+      });
+      return
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+       res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+      return
+    }
+
+    let location = await prisma.location.findUnique({
+      where: { userId },
+    });
+
+    if (location) {
+      location = await prisma.location.update({
+        where: { userId },
+        data: {
+          latitude,
+          longitude,
+          address: address || location.address,
+        },
+      });
+    } else {
+      location = await prisma.location.create({
+        data: {
+          userId,
+          latitude,
+          longitude,
+          address,
+        },
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Location updated successfully",
+      location,
+    });
+  } catch (error) {
+    console.error("Error setting location:", error);
+    res.status(500).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Internal server error",
+    });
+  }
+};
