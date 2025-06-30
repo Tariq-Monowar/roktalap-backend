@@ -29,24 +29,24 @@ model User {
   // for donors only
   birthID String?
 
-  donations Donation[]
-  location  Location?
+  donationsData Donation[] @relation("DonorDonations")
+  RecipientData Donation[] @relation("RecipientDonations")
+  location      Location?
 
   locationId  String?
   isFirstTime Boolean @default(true)
 
-  messages      Message[] 
+  messages      Message[]
   conversations Conversation[] @relation("UserConversations")
-  
+
   // Group admin relationships
   adminOfGroups Conversation[] @relation("GroupAdmin")
 
   // Message read receipts
   messageReads MessageRead[]
- 
 
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
   conversationId String?
 }
 
@@ -74,50 +74,53 @@ model Location {
 
 model Donation {
   id           String   @id @default(uuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  donorId      String // Donor side of the donation
+  recipientId  String // Recipient who received the blood
+  donor        User     @relation("DonorDonations", fields: [donorId], references: [id], onDelete: Cascade)
+  recipient    User     @relation("RecipientDonations", fields: [recipientId], references: [id], onDelete: Cascade)
   donationTime DateTime
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@index([userId])
+  @@index([donorId])
+  @@index([recipientId])
 }
 
 model Conversation {
-  id        String      @id @default(uuid())
-  type      ChatType    @default(SINGLE)
-  name      String?
-  image     String?
+  id          String   @id @default(uuid())
+  type        ChatType @default(SINGLE)
+  name        String?
+  image       String?
   description String?
-  
+
   // Group admin
-  adminId   String?
-  admin     User?       @relation("GroupAdmin", fields: [adminId], references: [id])
-  
-  messages  Message[]
-  users     User[]      @relation("UserConversations")
-  
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  adminId String?
+  admin   User?   @relation("GroupAdmin", fields: [adminId], references: [id])
+
+  messages Message[]
+  users    User[]    @relation("UserConversations")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Message {
-  id             String       @id @default(uuid())
+  id             String @id @default(uuid())
   content        String
   senderId       String
   conversationId String
-  
+
   // New fields for call functionality
-  type           MessageType  @default(TEXT)
-  callStatus     CallStatus?  // Only used when type is CALL
-  callDuration   Int?         // Duration in seconds, only for CALL type
-  
-  sender         User         @relation(fields: [senderId], references: [id])
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  messageReads   MessageRead[]
-  
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  type         MessageType @default(TEXT)
+  callStatus   CallStatus? // Only used when type is CALL
+  callDuration Int? // Duration in seconds, only for CALL type
+
+  sender       User          @relation(fields: [senderId], references: [id])
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messageReads MessageRead[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([conversationId])
   @@index([senderId])
@@ -140,17 +143,16 @@ model MessageRead {
   messageId String
   userId    String
   readAt    DateTime @default(now())
-  
-  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
-  
+
   @@unique([messageId, userId])
   @@index([messageId])
   @@index([userId])
 }
-
 
 enum ChatType {
   SINGLE
@@ -162,9 +164,6 @@ enum Role {
   DONOR
   RECIPIENT
 }
-
-
-
 
 // // "Delete" a user (soft delete)
 // await prisma.user.update({
