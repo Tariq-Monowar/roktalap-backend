@@ -29,8 +29,8 @@ model User {
   // for donors only
   birthID String?
 
-  donationsData Donation[] @relation("DonorDonations")
-  RecipientData Donation[] @relation("RecipientDonations")
+  donationsData BloodTransfer[] @relation("DonorDonations")
+  RecipientData BloodTransfer[] @relation("RecipientDonations")
   location      Location?
 
   locationId  String?
@@ -72,7 +72,7 @@ model Location {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-model Donation {
+model BloodTransfer {
   id           String   @id @default(uuid())
   donorId      String // Donor side of the donation
   recipientId  String // Recipient who received the blood

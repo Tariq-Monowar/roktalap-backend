@@ -355,6 +355,7 @@ app.use(morgan("dev"));
 // Routes
 app.use("/v1/users", users);
 app.use("/v1/messages", messages);
+app.use("/v1/blord", blord)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Error handling
