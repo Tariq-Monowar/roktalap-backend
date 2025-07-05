@@ -1,6 +1,6 @@
 import type { Request, Response } from "express"
 import { PrismaClient } from "@prisma/client"
-import { io, userSockets, onlineUsers } from "../../../app"
+import { io, userSockets, onlineUsers } from "../../../socket"
 
 const prisma = new PrismaClient()
 
@@ -957,7 +957,7 @@ export const searchDonors = async (req: Request, res: Response) => {
         role: "DONOR",
         OR: [
           { fullName: { contains: searchText, mode: "insensitive" } },
-          { bloodGroup: { contains: searchText, mode: "insensitive" } },
+          // Removed bloodGroup contains filter as it's not valid for enums
           { location: { address: { contains: searchText, mode: "insensitive" } } }
         ]
       },
@@ -985,18 +985,30 @@ export const searchRecepent = async (req: Request, res: Response) => {
         include: { location: true },
         take: 50
       });
-       res.status(200).json(donors);
-       return
+      res.status(200).json(donors);
+      return;
+    }
+
+    // Prepare OR filters
+    const orFilters: any[] = [
+      { fullName: { contains: searchText, mode: "insensitive" } },
+      { location: { address: { contains: searchText, mode: "insensitive" } } }
+    ];
+
+    // If searchText matches a valid blood group, add it to OR
+    const validBloodGroups = [
+      "A_POSITIVE", "A_NEGATIVE", "B_POSITIVE", "B_NEGATIVE",
+      "AB_POSITIVE", "AB_NEGATIVE", "O_POSITIVE", "O_NEGATIVE"
+    ];
+    if (validBloodGroups.includes(searchText.toUpperCase().replace("+", "_POSITIVE").replace("-", "_NEGATIVE"))) {
+      // Try to match both with and without _POSITIVE/_NEGATIVE for flexibility
+      orFilters.push({ bloodGroup: { equals: searchText.toUpperCase() } });
     }
 
     const donors = await prisma.user.findMany({
       where: {
         role: "RECIPIENT",
-        OR: [
-          { fullName: { contains: searchText, mode: "insensitive" } },
-          { bloodGroup: { contains: searchText, mode: "insensitive" } },
-          { location: { address: { contains: searchText, mode: "insensitive" } } }
-        ]
+        OR: orFilters
       },
       include: {
         location: true,

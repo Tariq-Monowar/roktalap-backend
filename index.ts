@@ -1,10 +1,13 @@
 import { PrismaClient } from "@prisma/client";
-import app from "./app";
+import { app, server } from "./app";
+import { initializeSocket } from "./socket";
 
-const PORT = process.env.PORT || 8000;PORT
+const PORT = process.env.PORT || 8000;
 const prisma = new PrismaClient();
 
-app.listen(PORT, async () => {
+initializeSocket(server);
+
+server.listen(PORT, async () => {
   try {
     console.log(`Server running on http://localhost:${PORT}`);
     await prisma.$connect();
