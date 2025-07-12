@@ -11,14 +11,20 @@ export interface AuthenticatedRequest extends Request {
 export const verifyUser = (...allowedRoles: string[]) => {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     const authHeader = req.headers["authorization"];
+    console.log(authHeader)
 
     if (!authHeader) {
       res.status(401).json({ message: "No token provided" });
       return;
     }
 
+     // Handle 'Bearer <token>' or just '<token>'
+    let token = authHeader.startsWith("Bearer ")
+      ? authHeader.split(" ")[1]
+      : authHeader;
+
     try {
-      const token = authHeader;
+  
       const decoded = jwt.verify(token, process.env.JWT_SECRET as string);
       req.user = decoded;
 

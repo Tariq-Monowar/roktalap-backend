@@ -175,25 +175,3 @@ enum BloodGroup {
   O_POSITIVE
   O_NEGATIVE
 }
-
-// // "Delete" a user (soft delete)
-// await prisma.user.update({
-//   where: { id: userId },
-//   data: { isDeleted: true }
-// });
-
-// // Get conversations with messages including deleted users' messages
-// const conversation = await prisma.conversation.findUnique({
-//   where: { id: conversationId },
-//   include: {
-//     messages: {
-//       include: {
-//         sender: true // will include null for deleted senders
-//       }
-//     },
-//     users: {
-//       where: { isDeleted: false } // filter out deleted users
-//     }
-//   }
-// });
-// https://chat.deepseek.com/a/chat/s/ea4c7c0b-5193-490f-8a16-75daeee68f2c

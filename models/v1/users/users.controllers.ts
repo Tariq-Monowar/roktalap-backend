@@ -34,6 +34,7 @@ function transformUserResponse(user: User) {
 }
 
 const downloadAndSaveImage = async (imageUrl: string): Promise<string> => {
+  console.log(imageUrl);
   try {
     const response = await fetch(imageUrl);
     if (!response.ok) throw new Error("Failed to download image");
@@ -55,10 +56,14 @@ export const googleAuth = async (req: Request, res: Response) => {
   try {
     const { fullName, email, image } = req.body;
 
-    if (!fullName || !email || !image) {
+    const missingField = ["fullName", "email", "image"].find(
+      (field) => !req.body[field]
+    );
+
+    if (missingField) {
       res.status(400).json({
         success: false,
-        message: "Something went wrong! Please try again",
+        message: `${missingField} is required!`,
       });
       return;
     }
@@ -103,8 +108,8 @@ export const googleAuth = async (req: Request, res: Response) => {
 export const addUserRole = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
-    console.log(userId)
-    console.log(req.body)
+    console.log(userId);
+    console.log(req.body);
     const { role } = req.body;
     if (!role) {
       res.status(400).json({
@@ -296,8 +301,6 @@ export const signupverifyOtp = async (req: Request, res: Response) => {
       process.env.JWT_SECRET,
       { expiresIn: "360d" }
     );
-
-  
 
     res.status(201).json({
       success: true,
@@ -492,8 +495,7 @@ export const switchUserRole = async (req: Request, res: Response) => {
       { expiresIn: "360d" }
     );
 
-    const userData = transformUserResponse(updatedUser) 
-
+    const userData = transformUserResponse(updatedUser);
 
     res.status(200).json({
       success: true,
@@ -510,7 +512,6 @@ export const switchUserRole = async (req: Request, res: Response) => {
   }
 };
 
-
 // users.controllers.ts
 
 export const setLocation = async (req: Request, res: Response) => {
@@ -520,11 +521,11 @@ export const setLocation = async (req: Request, res: Response) => {
     const userId = req.user?.userId;
 
     if (!latitude || !longitude) {
-       res.status(400).json({
+      res.status(400).json({
         success: false,
         message: "Latitude and longitude are required",
       });
-      return
+      return;
     }
 
     const user = await prisma.user.findUnique({
@@ -532,11 +533,11 @@ export const setLocation = async (req: Request, res: Response) => {
     });
 
     if (!user) {
-       res.status(404).json({
+      res.status(404).json({
         success: false,
         message: "User not found",
       });
-      return
+      return;
     }
 
     let location = await prisma.location.findUnique({

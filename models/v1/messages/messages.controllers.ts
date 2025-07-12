@@ -948,8 +948,11 @@ export const searchDonors = async (req: Request, res: Response) => {
         include: { location: true },
         take: 50
       });
-       res.status(200).json(donors);
-       return
+      res.status(200).json(donors.map(donor => ({
+        ...donor,
+        isOnline: !!onlineUsers[donor.id]
+      })));
+      return;
     }
 
     const donors = await prisma.user.findMany({
@@ -957,7 +960,6 @@ export const searchDonors = async (req: Request, res: Response) => {
         role: "DONOR",
         OR: [
           { fullName: { contains: searchText, mode: "insensitive" } },
-          // Removed bloodGroup contains filter as it's not valid for enums
           { location: { address: { contains: searchText, mode: "insensitive" } } }
         ]
       },
@@ -967,7 +969,10 @@ export const searchDonors = async (req: Request, res: Response) => {
       take: 100
     });
 
-    res.status(200).json(donors);
+    res.status(200).json(donors.map(donor => ({
+      ...donor,
+      isOnline: !!onlineUsers[donor.id]
+    })));
   } catch (error) {
     console.error("Donor search failed:", error);
     res.status(500).json({ message: "Donor search failed", error });
@@ -980,12 +985,15 @@ export const searchRecepent = async (req: Request, res: Response) => {
     const searchText = (search as string)?.trim();
 
     if (!searchText) {
-      const donors = await prisma.user.findMany({
+      const recipients = await prisma.user.findMany({
         where: { role: "RECIPIENT" },
         include: { location: true },
         take: 50
       });
-      res.status(200).json(donors);
+      res.status(200).json(recipients.map(recipient => ({
+        ...recipient,
+        isOnline: !!onlineUsers[recipient.id]
+      })));
       return;
     }
 
@@ -1001,11 +1009,10 @@ export const searchRecepent = async (req: Request, res: Response) => {
       "AB_POSITIVE", "AB_NEGATIVE", "O_POSITIVE", "O_NEGATIVE"
     ];
     if (validBloodGroups.includes(searchText.toUpperCase().replace("+", "_POSITIVE").replace("-", "_NEGATIVE"))) {
-      // Try to match both with and without _POSITIVE/_NEGATIVE for flexibility
       orFilters.push({ bloodGroup: { equals: searchText.toUpperCase() } });
     }
 
-    const donors = await prisma.user.findMany({
+    const recipients = await prisma.user.findMany({
       where: {
         role: "RECIPIENT",
         OR: orFilters
@@ -1016,9 +1023,12 @@ export const searchRecepent = async (req: Request, res: Response) => {
       take: 100
     });
 
-    res.status(200).json(donors);
+    res.status(200).json(recipients.map(recipient => ({
+      ...recipient,
+      isOnline: !!onlineUsers[recipient.id]
+    })));
   } catch (error) {
-    console.error("Donor search failed:", error);
-    res.status(500).json({ message: "Donor search failed", error });
+    console.error("Recipient search failed:", error);
+    res.status(500).json({ message: "Recipient search failed", error });
   }
 }

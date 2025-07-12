@@ -25,7 +25,8 @@ app.use(
       "http://localhost:5173",
       "http://localhost:5174",
       "https://v0-fix-previous-code.vercel.app",
-      "https://v0-firebase-backend-setup-khaki.vercel.app"
+      "https://v0-firebase-backend-setup-khaki.vercel.app",
+      "https://v0-firebase-api-documentation.vercel.app"
     ],
     credentials: true,
   })
