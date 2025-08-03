@@ -33,7 +33,7 @@ export const createConversation = async (req: Request, res: Response) => {
       name,
     })
 
-    // For single chat, check if conversation already exists
+
     if (type === "SINGLE" && validUserIds.length === 1) {
       const participantIds = [currentUserId, ...validUserIds]
 
@@ -123,7 +123,7 @@ export const createConversation = async (req: Request, res: Response) => {
       }
     }
 
-    // Create new conversation
+
     const conversation = await prisma.conversation.create({
       data: {
         type: type as "SINGLE" | "GROUP",
@@ -264,34 +264,34 @@ export const getConversations = async (req: Request, res: Response) => {
 
     console.log(`Found ${conversations.length} conversations for user ${userId}`)
 
-    // Add online status and unread count
-    const conversationsWithStatus = await Promise.all(
-      conversations.map(async (conversation) => {
-        // Count unread messages for this user
-        const unreadCount = await prisma.message.count({
-          where: {
-            conversationId: conversation.id,
-            senderId: {
-              not: userId,
-            },
-            messageReads: {
-              none: {
-                userId: userId,
-              },
-            },
-          },
-        })
 
-        return {
-          ...conversation,
-          unreadCount,
-          users: conversation.users.map((user) => ({
-            ...user,
-            isOnline: !!onlineUsers[user.id],
-          })),
+    // Optimize unread count queries with a single query instead of N+1
+    const conversationIds = conversations.map(c => c.id);
+    const unreadCounts = await prisma.message.groupBy({
+      by: ['conversationId'],
+      where: {
+        conversationId: { in: conversationIds },
+        senderId: { not: userId },
+        messageReads: {
+          none: { userId: userId }
         }
-      })
-    )
+      },
+      _count: { id: true }
+    });
+
+    const unreadCountMap = unreadCounts.reduce((acc, item) => {
+      acc[item.conversationId] = item._count.id;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const conversationsWithStatus = conversations.map((conversation) => ({
+      ...conversation,
+      unreadCount: unreadCountMap[conversation.id] || 0,
+      users: conversation.users.map((user) => ({
+        ...user,
+        isOnline: !!onlineUsers[user.id],
+      })),
+    }))
 
     res.status(200).json(conversationsWithStatus)
   } catch (error) {
@@ -385,18 +385,26 @@ export const sendMessage = async (req: Request, res: Response) => {
     console.log("Message created:", message.id)
 
     // Emit message to conversation room
-    io.to(conversationId).emit("new_message", message)
+    if (io) {
+      io.to(conversationId).emit("new_message", message);
 
-    // Send notifications to online users only
-    message.conversation.users.forEach((user) => {
-      if (user.id !== senderId && userSockets[user.id]) {
-        io.to(userSockets[user.id]).emit("message_notification", {
+      // Send notifications to online users only - more efficient batch operation
+      const onlineRecipients = message.conversation.users
+        .filter(user => user.id !== senderId && userSockets[user.id])
+        .map(user => userSockets[user.id]);
+
+      if (onlineRecipients.length > 0) {
+        const notification = {
           conversationId,
           message: message.content,
           sender: message.sender,
-        })
+        };
+
+        onlineRecipients.forEach(socketId => {
+          io.to(socketId).emit("message_notification", notification);
+        });
       }
-    })
+    }
 
     res.status(201).json(message)
   } catch (error) {
@@ -659,49 +667,65 @@ export const markConversationAsRead = async (req: Request, res: Response) => {
       return
     }
 
-    // Create read receipts for all unread messages
-    const readReceipts = await Promise.all(
-      unreadMessages.map((message) =>
-        prisma.messageRead.create({
-          data: {
-            messageId: message.id,
-            userId: userId,
-            readAt: new Date(),
+    // Create read receipts for all unread messages using batch operation
+    const readAt = new Date();
+    const readReceiptsData = unreadMessages.map(message => ({
+      messageId: message.id,
+      userId: userId,
+      readAt: readAt,
+    }));
+
+    await prisma.messageRead.createMany({
+      data: readReceiptsData,
+      skipDuplicates: true
+    });
+
+    // Fetch created read receipts with user data
+    const readReceipts = await prisma.messageRead.findMany({
+      where: {
+        messageId: { in: unreadMessages.map(m => m.id) },
+        userId: userId
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
           },
-          include: {
-            user: {
-              select: {
-                id: true,
-                fullName: true,
-              },
-            },
-          },
-        })
-      )
-    )
+        },
+      },
+    });
 
     console.log(`Marked ${readReceipts.length} messages as read in conversation ${conversationId} by user ${userId}`)
 
-    // Emit read receipts to conversation room
-    readReceipts.forEach((receipt, index) => {
-      const message = unreadMessages[index]
-      
-      io.to(conversationId).emit("message_read", {
-        messageId: message.id,
-        readBy: receipt.user,
-        readAt: receipt.readAt,
-      })
+    // Emit read receipts to conversation room - optimized batch emission
+    if (io && readReceipts.length > 0) {
+      const readReceiptMap = readReceipts.reduce((acc, receipt) => {
+        acc[receipt.messageId] = receipt;
+        return acc;
+      }, {} as Record<string, typeof readReceipts[0]>);
 
-      // Notify the sender specifically
-      if (userSockets[message.senderId]) {
-        io.to(userSockets[message.senderId]).emit("message_read_receipt", {
-          messageId: message.id,
-          conversationId: conversationId,
-          readBy: receipt.user,
-          readAt: receipt.readAt,
-        })
-      }
-    })
+      unreadMessages.forEach(message => {
+        const receipt = readReceiptMap[message.id];
+        if (receipt) {
+          io.to(conversationId).emit("message_read", {
+            messageId: message.id,
+            readBy: receipt.user,
+            readAt: receipt.readAt,
+          });
+
+          // Notify the sender specifically
+          if (userSockets[message.senderId]) {
+            io.to(userSockets[message.senderId]).emit("message_read_receipt", {
+              messageId: message.id,
+              conversationId: conversationId,
+              readBy: receipt.user,
+              readAt: receipt.readAt,
+            });
+          }
+        }
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -939,96 +963,117 @@ export const leaveGroup = async (req: Request, res: Response) => {
 
 export const searchDonors = async (req: Request, res: Response) => {
   try {
-    const { search } = req.query;
+    const { search, limit = 50 } = req.query;
     const searchText = (search as string)?.trim();
+    const searchLimit = Math.min(parseInt(limit as string) || 50, 100);
 
-    if (!searchText) {
-      const donors = await prisma.user.findMany({
-        where: { role: "DONOR" },
-        include: { location: true },
-        take: 50
-      });
-      res.status(200).json(donors.map(donor => ({
-        ...donor,
-        isOnline: !!onlineUsers[donor.id]
-      })));
-      return;
-    }
+    const whereClause = searchText 
+      ? {
+          role: "DONOR" as const,
+          OR: [
+            { fullName: { contains: searchText, mode: "insensitive" as const } },
+            { location: { address: { contains: searchText, mode: "insensitive" as const } } }
+          ]
+        }
+      : { role: "DONOR" as const };
 
     const donors = await prisma.user.findMany({
-      where: {
-        role: "DONOR",
-        OR: [
-          { fullName: { contains: searchText, mode: "insensitive" } },
-          { location: { address: { contains: searchText, mode: "insensitive" } } }
-        ]
+      where: whereClause,
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        image: true,
+        bloodGroup: true,
+        phoneNumber: true,
+        address: true,
+        bio: true,
+        location: {
+          select: {
+            latitude: true,
+            longitude: true,
+            address: true
+          }
+        }
       },
-      include: {
-        location: true,
-      },
-      take: 100
+      take: searchLimit
     });
 
-    res.status(200).json(donors.map(donor => ({
+    // Batch process online status instead of mapping one by one
+    const donorsWithStatus = donors.map(donor => ({
       ...donor,
       isOnline: !!onlineUsers[donor.id]
-    })));
+    }));
+
+    res.status(200).json(donorsWithStatus);
   } catch (error) {
     console.error("Donor search failed:", error);
-    res.status(500).json({ message: "Donor search failed", error });
+    res.status(500).json({ message: "Donor search failed", error: error.message });
   }
 }
 
 export const searchRecepent = async (req: Request, res: Response) => {
   try {
-    const { search } = req.query;
+    const { search, limit = 50 } = req.query;
     const searchText = (search as string)?.trim();
+    const searchLimit = Math.min(parseInt(limit as string) || 50, 100);
 
-    if (!searchText) {
-      const recipients = await prisma.user.findMany({
-        where: { role: "RECIPIENT" },
-        include: { location: true },
-        take: 50
-      });
-      res.status(200).json(recipients.map(recipient => ({
-        ...recipient,
-        isOnline: !!onlineUsers[recipient.id]
-      })));
-      return;
-    }
+    let whereClause: any = { role: "RECIPIENT" };
 
-    // Prepare OR filters
-    const orFilters: any[] = [
-      { fullName: { contains: searchText, mode: "insensitive" } },
-      { location: { address: { contains: searchText, mode: "insensitive" } } }
-    ];
+    if (searchText) {
+      const orFilters: any[] = [
+        { fullName: { contains: searchText, mode: "insensitive" } },
+        { location: { address: { contains: searchText, mode: "insensitive" } } }
+      ];
 
-    // If searchText matches a valid blood group, add it to OR
-    const validBloodGroups = [
-      "A_POSITIVE", "A_NEGATIVE", "B_POSITIVE", "B_NEGATIVE",
-      "AB_POSITIVE", "AB_NEGATIVE", "O_POSITIVE", "O_NEGATIVE"
-    ];
-    if (validBloodGroups.includes(searchText.toUpperCase().replace("+", "_POSITIVE").replace("-", "_NEGATIVE"))) {
-      orFilters.push({ bloodGroup: { equals: searchText.toUpperCase() } });
+      // If searchText matches a valid blood group, add it to OR
+      const validBloodGroups = [
+        "A_POSITIVE", "A_NEGATIVE", "B_POSITIVE", "B_NEGATIVE",
+        "AB_POSITIVE", "AB_NEGATIVE", "O_POSITIVE", "O_NEGATIVE"
+      ];
+      
+      const normalizedBloodGroup = searchText.toUpperCase()
+        .replace(/\+/g, "_POSITIVE")
+        .replace(/-/g, "_NEGATIVE");
+      
+      if (validBloodGroups.includes(normalizedBloodGroup)) {
+        orFilters.push({ bloodGroup: { equals: normalizedBloodGroup } });
+      }
+
+      whereClause.OR = orFilters;
     }
 
     const recipients = await prisma.user.findMany({
-      where: {
-        role: "RECIPIENT",
-        OR: orFilters
+      where: whereClause,
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        image: true,
+        bloodGroup: true,
+        phoneNumber: true,
+        address: true,
+        bio: true,
+        location: {
+          select: {
+            latitude: true,
+            longitude: true,
+            address: true
+          }
+        }
       },
-      include: {
-        location: true,
-      },
-      take: 100
+      take: searchLimit
     });
 
-    res.status(200).json(recipients.map(recipient => ({
+    // Batch process online status
+    const recipientsWithStatus = recipients.map(recipient => ({
       ...recipient,
       isOnline: !!onlineUsers[recipient.id]
-    })));
+    }));
+
+    res.status(200).json(recipientsWithStatus);
   } catch (error) {
     console.error("Recipient search failed:", error);
-    res.status(500).json({ message: "Recipient search failed", error });
+    res.status(500).json({ message: "Recipient search failed", error: error.message });
   }
 }

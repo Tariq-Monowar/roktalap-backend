@@ -11,7 +11,8 @@ import {
   leaveGroup,
   searchDonors,
   searchRecepent,
-  markMessageAsRead
+  markMessageAsRead,
+  markConversationAsRead
 } from "./messages.controllers"
 
 const router = express.Router()
@@ -38,6 +39,9 @@ router.get("/:conversationId", verifyUser("ANY"), getMessages)
 
 // Mark message as read
 router.post("/:conversationId/messages/:messageId/read", verifyUser("ANY"), markMessageAsRead)
+
+// Mark entire conversation as read
+router.post("/:conversationId/read", verifyUser("ANY"), markConversationAsRead)
 
 // Group management routes
 router.post("/:conversationId/add-user", verifyUser("ANY"), addUserToGroup)

@@ -53,7 +53,6 @@ const findDonorsWithRadius = async (currentUser: any, userId: string, radius: nu
     ORDER BY distance ASC
   `;
 
-  // Add online status to each donor
   return donors.map(donor => ({
     ...donor,
     isOnline: !!onlineUsers[donor.id]
@@ -63,11 +62,10 @@ const findDonorsWithRadius = async (currentUser: any, userId: string, radius: nu
 export const findNearbyDonors = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
-    let searchRadius = 20; // Start with 20km
-    const maxRadius = 200; // Maximum search radius in km
-    const radiusIncrement = 20; // Increment by 20km each time
+    let searchRadius = 20;  
+    const maxRadius = 200; 
+    const radiusIncrement = 20; 
 
-    // Get current user's details
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
       include: { location: true },
@@ -96,7 +94,6 @@ export const findNearbyDonors = async (req: Request, res: Response) => {
 
     let nearbyDonors: NearbyDonor[] = [];
     
-    // Keep expanding the radius until donors are found or max radius is reached
     while (searchRadius <= maxRadius) {
       nearbyDonors = await findDonorsWithRadius(currentUser, userId, searchRadius);
       
@@ -149,7 +146,6 @@ export const createBloodDonation = async (req: Request, res: Response) => {
       return;
     }
 
-    // Check if donor exists and is a DONOR
     const donor = await prisma.user.findUnique({
       where: { id: donorId },
     });

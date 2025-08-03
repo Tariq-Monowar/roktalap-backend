@@ -4,14 +4,16 @@ import { Socket } from "socket.io";
 import { DefaultEventsMap } from "socket.io/dist/typed-events";
 import { PrismaClient } from "@prisma/client";
 import http from "http";
+import { performanceMonitor } from "./utils/performanceMonitor";
+import { socketCache } from "./utils/socketCache";
 
 const prisma = new PrismaClient();
 
 interface CustomSocket extends Socket<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap> {
   userId?: string;
+  heartbeatTimer?: NodeJS.Timeout;
 }
 
-// In-memory tracking using Socket.IO only
 export const userSockets: Record<string, string> = {};
 export const onlineUsers: Record<
   string,
@@ -49,15 +51,15 @@ export const initializeSocket = (server: http.Server) => {
 
   io.on("connection", (socket: CustomSocket) => {
     console.log("User connected", socket.id);
+    performanceMonitor.trackConnection(true);
 
-    // User registration - purely in-memory
     socket.on("register",(userData: {id: string; fullName: string; email: string; image?: string}) => {
         const { id, fullName, email, image } = userData;
 
-        // Store socket mapping
+
+        socket.userId = id;
         userSockets[id] = socket.id;
 
-        // Store user info in memory
         onlineUsers[id] = {
           id,
           fullName,
@@ -66,58 +68,73 @@ export const initializeSocket = (server: http.Server) => {
           connectedAt: new Date(),
         };
 
-        // Broadcast to all clients that user is online
+        // Start heartbeat timer
+        socket.heartbeatTimer = setInterval(() => {
+          if (onlineUsers[id]) {
+            socket.emit("heartbeat_ping");
+          }
+        }, 30000); // Ping every 30 seconds
+
         socket.broadcast.emit("user_online", {
           userId: id,
           userInfo: onlineUsers[id],
           isOnline: true,
         });
 
-        // Send current online users to the newly connected user
         socket.emit("online_users_list", Object.values(onlineUsers));
 
         console.log(`User ${fullName} (${id}) is now online`);
       }
     );
 
-    // Handle disconnect
     socket.on("disconnect", () => {
-      // Find user by socket ID and remove from online tracking
-      for (const [userId, socketId] of Object.entries(userSockets)) {
-        if (socketId === socket.id) {
-          const userInfo = onlineUsers[userId];
+      const userId = socket.userId;
+      
+      if (userId) {
+        const userInfo = onlineUsers[userId];
 
-          // Remove from tracking
-          delete userSockets[userId];
-          delete onlineUsers[userId];
+        // Clear heartbeat timer
+        if (socket.heartbeatTimer) {
+          clearInterval(socket.heartbeatTimer);
+        }
 
-          // Broadcast to all clients that user is offline
-          socket.broadcast.emit("user_online", {
-            userId,
-            userInfo,
-            isOnline: false,
-          });
+        delete userSockets[userId];
+        delete onlineUsers[userId];
 
-          // Remove from typing users
-          Object.keys(typingUsers).forEach((conversationId) => {
-            typingUsers[conversationId]?.delete(userId);
-            if (typingUsers[conversationId]?.size === 0) {
+        socket.broadcast.emit("user_online", {
+          userId,
+          userInfo,
+          isOnline: false,
+        });
+
+        // Clean up typing indicators more efficiently
+        Object.keys(typingUsers).forEach((conversationId) => {
+          if (typingUsers[conversationId]?.has(userId)) {
+            typingUsers[conversationId].delete(userId);
+            
+            // Emit typing stop to conversation
+            socket.to(conversationId).emit("user_typing", {
+              conversationId,
+              userId,
+              isTyping: false,
+            });
+
+            if (typingUsers[conversationId].size === 0) {
               delete typingUsers[conversationId];
             }
-          });
+          }
+        });
 
-          console.log(`User ${userInfo?.fullName} (${userId}) went offline`);
-          break;
-        }
+        console.log(`User ${userInfo?.fullName} (${userId}) went offline`);
+        performanceMonitor.trackConnection(false);
+        socketCache.removeUser(userId);
       }
     });
 
-    // Get online users
     socket.on("get_online_users", () => {
       socket.emit("online_users_list", Object.values(onlineUsers));
     });
 
-    // Check if specific user is online
     socket.on("check_user_online", (userId: string) => {
       const isOnline = !!onlineUsers[userId];
       socket.emit("user_online_status", {
@@ -127,7 +144,7 @@ export const initializeSocket = (server: http.Server) => {
       });
     });
 
-    // Join conversation
+
     socket.on("join_conversation", (conversationId: string) => {
       socket.join(conversationId);
       console.log(`User joined conversation ${conversationId}`);
@@ -139,7 +156,9 @@ export const initializeSocket = (server: http.Server) => {
       console.log(`User left conversation ${conversationId}`);
     });
 
-    // Typing indicators
+    // Improved typing indicators with auto-timeout
+    const typingTimeouts: Record<string, NodeJS.Timeout> = {};
+
     socket.on(
       "typing_start",
       (data: { conversationId: string; userId: string; userName: string }) => {
@@ -151,7 +170,30 @@ export const initializeSocket = (server: http.Server) => {
 
         typingUsers[conversationId].add(userId);
 
-        // Notify other users in the conversation
+        // Clear existing timeout
+        const timeoutKey = `${conversationId}_${userId}`;
+        if (typingTimeouts[timeoutKey]) {
+          clearTimeout(typingTimeouts[timeoutKey]);
+        }
+
+        // Auto-stop typing after 3 seconds if no typing_stop received
+        typingTimeouts[timeoutKey] = setTimeout(() => {
+          if (typingUsers[conversationId]) {
+            typingUsers[conversationId].delete(userId);
+            
+            if (typingUsers[conversationId].size === 0) {
+              delete typingUsers[conversationId];
+            }
+
+            socket.to(conversationId).emit("user_typing", {
+              conversationId,
+              userId,
+              isTyping: false,
+            });
+          }
+          delete typingTimeouts[timeoutKey];
+        }, 3000);
+
         socket.to(conversationId).emit("user_typing", {
           conversationId,
           userId,
@@ -174,7 +216,13 @@ export const initializeSocket = (server: http.Server) => {
           }
         }
 
-        // Notify other users in the conversation
+        // Clear timeout
+        const timeoutKey = `${conversationId}_${userId}`;
+        if (typingTimeouts[timeoutKey]) {
+          clearTimeout(typingTimeouts[timeoutKey]);
+          delete typingTimeouts[timeoutKey];
+        }
+
         socket.to(conversationId).emit("user_typing", {
           conversationId,
           userId,
@@ -183,26 +231,29 @@ export const initializeSocket = (server: http.Server) => {
       }
     );
 
-    // Heartbeat to keep connection alive and verify user is still active
+
+    socket.on("heartbeat_pong", () => {
+      const userId = socket.userId;
+      if (userId && onlineUsers[userId]) {
+        onlineUsers[userId].connectedAt = new Date();
+      }
+    });
+
     socket.on("heartbeat", (userId: string) => {
       if (onlineUsers[userId]) {
         onlineUsers[userId].connectedAt = new Date();
       }
     });
 
-    // Call signaling events
     socket.on("initiate_call", async (data: { conversationId: string }) => {
       try {
-        // Find userId by socket ID
-        const userId = Object.keys(userSockets).find(
-          (id) => userSockets[id] === socket.id
-        );
+        const userId = socket.userId;
         
         if (!userId) {
-          throw new Error("User not found for this socket connection");
+          socket.emit("call_error", { message: "User not authenticated" });
+          return;
         }
-        
-        // Create a call message
+
         const message = await prisma.message.create({
           data: {
             type: "CALL" as const,
@@ -221,7 +272,35 @@ export const initializeSocket = (server: http.Server) => {
           }
         });
 
-        // Notify other participants
+        // Set timeout to mark call as missed if not answered in 60 seconds
+        setTimeout(async () => {
+          try {
+            const callMessage = await prisma.message.findUnique({
+              where: { id: message.id },
+              select: { callStatus: true }
+            });
+            
+            if (callMessage?.callStatus === "MISSED") {
+              await prisma.message.update({
+                where: { id: message.id },
+                data: { callStatus: "MISSED" }
+              });
+
+              // Notify all users that call was missed
+              message.conversation.users.forEach(user => {
+                if (userSockets[user.id]) {
+                  io.to(userSockets[user.id]).emit("call_missed", {
+                    messageId: message.id,
+                    conversationId: data.conversationId
+                  });
+                }
+              });
+            }
+          } catch (error) {
+            console.error("Call timeout error:", error);
+          }
+        }, 60000);
+
         message.conversation.users.forEach(user => {
           if (user.id !== userId && userSockets[user.id]) {
             io.to(userSockets[user.id]).emit("incoming_call", {
@@ -234,6 +313,7 @@ export const initializeSocket = (server: http.Server) => {
 
       } catch (error) {
         console.error("Call initiation error:", error);
+        socket.emit("call_error", { message: "Failed to initiate call" });
       }
     });
 
@@ -242,12 +322,11 @@ export const initializeSocket = (server: http.Server) => {
       response: "accept" | "decline"
     }) => {
       try {
-        const userId = Object.keys(userSockets).find(
-          (id) => userSockets[id] === socket.id
-        );
+        const userId = socket.userId;
 
         if (!userId) {
-          throw new Error("User not found for this socket connection");
+          socket.emit("call_error", { message: "User not authenticated" });
+          return;
         }
 
         const message = await prisma.message.findUnique({
@@ -255,18 +334,29 @@ export const initializeSocket = (server: http.Server) => {
           include: { sender: true }
         });
 
-        if (message) {
-          // Notify the caller
-          if (userSockets[message.senderId]) {
-            io.to(userSockets[message.senderId]).emit("call_answered", {
-              messageId: data.messageId,
-              userId: userId,
-              response: data.response
-            });
-          }
+        if (!message) {
+          socket.emit("call_error", { message: "Call not found" });
+          return;
         }
+
+        // Update call status based on response
+        const callStatus = data.response === "accept" ? "COMPLETED" : "DECLINED";
+        await prisma.message.update({
+          where: { id: data.messageId },
+          data: { callStatus }
+        });
+
+        if (userSockets[message.senderId]) {
+          io.to(userSockets[message.senderId]).emit("call_answered", {
+            messageId: data.messageId,
+            userId: userId,
+            response: data.response
+          });
+        }
+
       } catch (error) {
         console.error("Call response error:", error);
+        socket.emit("call_error", { message: "Failed to respond to call" });
       }
     });
 
@@ -287,7 +377,7 @@ export const initializeSocket = (server: http.Server) => {
           }
         });
 
-        // Notify all participants
+
         message.conversation.users.forEach(user => {
           if (userSockets[user.id]) {
             io.to(userSockets[user.id]).emit("call_ended", {
@@ -301,15 +391,23 @@ export const initializeSocket = (server: http.Server) => {
       }
     });
 
-    // WebRTC signaling
+
     socket.on("webrtc_signal", (data: {
       messageId: string,
       targetUserId: string,
       signal: any
     }) => {
-      const userId = Object.keys(userSockets).find(
-        (id) => userSockets[id] === socket.id
-      );
+      const userId = socket.userId;
+
+      if (!userId) {
+        socket.emit("call_error", { message: "User not authenticated" });
+        return;
+      }
+
+      if (!userSockets[data.targetUserId]) {
+        socket.emit("call_error", { message: "Target user not online" });
+        return;
+      }
 
       if (userSockets[data.targetUserId] && userId) {
         io.to(userSockets[data.targetUserId]).emit("webrtc_signal", {
