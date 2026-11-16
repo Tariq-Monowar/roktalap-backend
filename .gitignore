@@ -62,12 +62,9 @@ web_modules/
 .yarn-integrity
 
 # Environment variables - Keep environment variables out of version control
-.env
-.env.local
 .env.development.local
 .env.test.local
 .env.production.local
-.env.*
 *.env
 
 # parcel-bundler cache (https://parceljs.org/)
@@ -242,7 +239,4 @@ coverage/
 
 # PM2
 .pm2/
-branch_structure.json
-temp_auto_push.bat
-temp_interactive_push.bat
-.gitignore
+config.bat
